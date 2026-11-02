@@ -779,62 +779,169 @@
       stage.style.setProperty('--p', '1');
     }
 
-    /* Enquiry form: opens the visitor's email app addressed to info@shmai.com */
+    /* Enquiry form: the API saves the submission and emails the person who filled it out. */
     var form = document.getElementById('enquiry');
     var status = document.getElementById('form-status');
     var label = document.getElementById('f-message-label');
+    var submitBtn = form.querySelector('button[type="submit"]');
     var topics = {
-      receptionist: { subject: 'AI receptionist enquiry', label: 'How do calls reach the office today?' },
-      growth: { subject: 'Website, SEO and social enquiry', label: 'Which service, and what should we know?' }
+      receptionist: 'How do calls reach the office today?',
+      growth: 'Which service, and what should we know?'
     };
-    var to = 'info@shmai.com';
+    var fieldIds = { name: 'f-name', email: 'f-email', message: 'f-message', site: 'f-site' };
+    var emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
     function setTopic(v) {
       var r = form.querySelector('input[name="topic"][value="' + v + '"]');
       if (r) r.checked = true;
-      label.textContent = topics[v].label;
+      if (topics[v]) label.textContent = topics[v];
     }
     form.addEventListener('change', function (e) { if (e.target.name === 'topic') setTopic(e.target.value); });
     document.querySelectorAll('[data-topic]').forEach(function (a) {
       a.addEventListener('click', function () { setTopic(a.getAttribute('data-topic')); });
     });
 
-    var rules = {
-      'f-name': function (v) { return v.trim() ? '' : 'Enter your full name.'; },
-      'f-email': function (v) {
-        if (!v.trim()) return 'Enter your email address.';
-        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()) ? '' : 'Enter a valid email, like name@office.com.';
-      },
-      'f-message': function (v) { return v.trim().length >= 10 ? '' : 'Tell us a little more, at least a sentence.'; }
-    };
-    function check(id) {
-      var el = document.getElementById(id);
-      var msg = rules[id](el.value);
+    function setStatus(kind, text) {
+      status.className = 'form-status' + (kind ? ' is-' + kind : '');
+      status.textContent = text || '';
+    }
+    function clearErrors() {
+      ['f-name', 'f-email', 'f-message'].forEach(function (id) {
+        var err = document.getElementById(id + '-error');
+        err.textContent = '';
+        err.hidden = true;
+        document.getElementById(id).removeAttribute('aria-invalid');
+      });
+      document.getElementById('f-site').removeAttribute('aria-invalid');
+      setStatus('', '');
+    }
+    function showFieldError(id, msg) {
       var err = document.getElementById(id + '-error');
       err.textContent = msg;
-      err.hidden = !msg;
-      el.setAttribute('aria-invalid', msg ? 'true' : 'false');
-      return !msg;
+      err.hidden = false;
+      document.getElementById(id).setAttribute('aria-invalid', 'true');
     }
-    Object.keys(rules).forEach(function (id) {
+    function siteForSend(raw) {
+      var v = raw.trim();
+      if (!v || v === 'https://' || v === 'http://') return '';
+      if (/\s/.test(v)) return null;
+      var candidate = /^[a-z][a-z0-9+.-]*:/i.test(v) ? v : 'https://' + v;
+      try {
+        var url = new URL(candidate);
+        if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+        if (!url.hostname) return null;
+        if (url.hostname !== 'localhost' && url.hostname.indexOf('.') === -1) return null;
+        return candidate;
+      } catch (err) {
+        return null;
+      }
+    }
+
+    ['f-name', 'f-email', 'f-message'].forEach(function (id) {
       var el = document.getElementById(id);
-      el.addEventListener('blur', function () { if (el.value) check(id); });
-      el.addEventListener('input', function () { if (el.getAttribute('aria-invalid') === 'true') check(id); });
+      el.addEventListener('input', function () {
+        if (el.getAttribute('aria-invalid') === 'true') {
+          var err = document.getElementById(id + '-error');
+          err.textContent = '';
+          err.hidden = true;
+          el.removeAttribute('aria-invalid');
+        }
+      });
     });
+
     form.addEventListener('submit', function (e) {
       e.preventDefault();
-      var bad = Object.keys(rules).filter(function (id) { return !check(id); });
-      if (bad.length) {
-        status.className = 'form-status is-error';
-        status.textContent = 'Please check the highlighted fields.';
-        document.getElementById(bad[0]).focus();
+      clearErrors();
+
+      var topicInput = form.querySelector('input[name="topic"]:checked');
+      var topic = topicInput ? topicInput.value : '';
+      var name = document.getElementById('f-name').value.trim();
+      var email = document.getElementById('f-email').value.trim();
+      var message = document.getElementById('f-message').value.trim();
+      var site = siteForSend(document.getElementById('f-site').value);
+      var firstInvalid = null;
+      var statusError = '';
+
+      if (topic !== 'receptionist' && topic !== 'growth') {
+        statusError = 'Choose an enquiry type.';
+        firstInvalid = form.querySelector('input[name="topic"]');
+      }
+      if (!name) {
+        showFieldError('f-name', 'Enter your full name.');
+        if (!firstInvalid) firstInvalid = document.getElementById('f-name');
+      }
+      if (!email) {
+        showFieldError('f-email', 'Enter your email address.');
+        if (!firstInvalid) firstInvalid = document.getElementById('f-email');
+      } else if (!emailPattern.test(email)) {
+        showFieldError('f-email', 'Enter a valid email, like name@office.com.');
+        if (!firstInvalid) firstInvalid = document.getElementById('f-email');
+      }
+      if (site === null) {
+        if (!statusError) statusError = 'Enter a valid website address, like https://office.com.';
+        document.getElementById('f-site').setAttribute('aria-invalid', 'true');
+        if (!firstInvalid) firstInvalid = document.getElementById('f-site');
+      }
+      if (statusError) setStatus('error', statusError);
+      if (!message) {
+        showFieldError('f-message', 'Enter a message.');
+        if (!firstInvalid) firstInvalid = document.getElementById('f-message');
+      }
+      if (firstInvalid) {
+        firstInvalid.focus();
         return;
       }
-      var t = topics[form.querySelector('input[name="topic"]:checked').value];
-      var d = new FormData(form);
-      var body = 'Name: ' + d.get('name') + '\nEmail: ' + d.get('email') + '\nWebsite: ' + (d.get('site') || '-') + '\n\n' + d.get('message');
-      window.location.href = 'mailto:' + to + '?subject=' + encodeURIComponent(t.subject) + '&body=' + encodeURIComponent(body);
-      status.className = 'form-status is-success';
-      status.textContent = 'Your email app should open with the message ready to send to ' + to + '.';
+
+      submitBtn.disabled = true;
+      setStatus('', 'Sending…');
+
+      fetch('https://mail-server-plum.vercel.app/api/chiro-enquiry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topic: topic,
+          name: name,
+          email: email,
+          site: site,
+          message: message
+        })
+      }).then(function (res) {
+        return res.json().catch(function () { return {}; }).then(function (data) {
+          return { status: res.status, data: data };
+        });
+      }).then(function (result) {
+        var data = result.data || {};
+        if (result.status === 201 && data.success) {
+          form.reset();
+          setTopic('receptionist');
+          setStatus('success', data.email_sent === false
+            ? 'Your enquiry has been recorded, but the confirmation email could not be sent.'
+            : 'Your enquiry has been recorded. A confirmation email is on its way.');
+          return;
+        }
+        if (result.status === 400) {
+          var fieldId = fieldIds[data.field];
+          var apiError = data.error || 'Please check this field.';
+          if (data.field === 'topic' || data.field === 'site' || !fieldId) {
+            setStatus('error', apiError);
+            if (data.field === 'site') document.getElementById('f-site').setAttribute('aria-invalid', 'true');
+            var focusEl = data.field === 'topic'
+              ? form.querySelector('input[name="topic"]')
+              : (fieldId ? document.getElementById(fieldId) : null);
+            if (focusEl) focusEl.focus();
+          } else {
+            setStatus('', '');
+            showFieldError(fieldId, apiError);
+            document.getElementById(fieldId).focus();
+          }
+          return;
+        }
+        setStatus('error', 'Something went wrong. Please try again.');
+      }).catch(function () {
+        setStatus('error', 'Something went wrong. Please try again.');
+      }).then(function () {
+        submitBtn.disabled = false;
+      });
     });
   })();
   </script>
